@@ -71,46 +71,229 @@ _CHAT_HTML = """<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>CertiBot (MVP)</title>
+    <title>CertiBot</title>
     <style>
-      :root { color-scheme: light dark; }
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
-      .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
-      .card { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 12px; }
-      .row { display: flex; gap: 8px; align-items: center; }
-      input { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,.35); }
-      button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(127,127,127,.35); cursor: pointer; }
-      pre { white-space: pre-wrap; word-break: break-word; margin: 12px 0 0; }
-      .hint { opacity: .8; font-size: 13px; margin-top: 8px; }
-      a { word-break: break-word; }
+      :root {
+        color-scheme: dark;
+        --bg: #0b1220;
+        --panel: #111a2a;
+        --panel-2: #0f1725;
+        --border: #263246;
+        --text: #e7edf7;
+        --muted: #9fb0c8;
+        --accent: #4f8cff;
+        --accent-2: #2f6fe3;
+        --user: #1e293b;
+        --bot: #152033;
+        --ok: #1f9d63;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+        color: var(--text);
+        background: radial-gradient(1200px 400px at 15% -10%, #1a2d4f 0%, transparent 60%),
+                    radial-gradient(900px 300px at 90% -20%, #20304f 0%, transparent 60%),
+                    var(--bg);
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 28px 16px;
+      }
+      .app {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+        box-shadow: 0 14px 40px rgba(0,0,0,.35);
+        overflow: hidden;
+      }
+      .topbar {
+        padding: 14px 16px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .brand {
+        font-weight: 700;
+        letter-spacing: .2px;
+      }
+      .badge {
+        font-size: 12px;
+        color: #b8c6da;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 4px 8px;
+      }
+      .chat {
+        min-height: 420px;
+        max-height: 62vh;
+        overflow: auto;
+        padding: 16px;
+        background: var(--panel-2);
+      }
+      .msg {
+        margin-bottom: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .msg.user { align-items: flex-end; }
+      .msg.bot { align-items: flex-start; }
+      .bubble {
+        max-width: min(760px, 92%);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.45;
+      }
+      .msg.user .bubble { background: var(--user); }
+      .msg.bot .bubble { background: var(--bot); }
+      .meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .evidence {
+        max-width: min(760px, 92%);
+        display: grid;
+        gap: 8px;
+      }
+      .ev-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: #101b2d;
+      }
+      .ev-card a {
+        color: #b9d2ff;
+        text-decoration: none;
+        word-break: break-all;
+      }
+      .ev-card a:hover { text-decoration: underline; }
+      .composer {
+        border-top: 1px solid var(--border);
+        background: var(--panel);
+        padding: 12px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0d1625;
+        color: var(--text);
+        outline: none;
+      }
+      input:focus { border-color: var(--accent); }
+      button {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 0 16px;
+        font-weight: 600;
+        color: white;
+        background: linear-gradient(180deg, var(--accent), var(--accent-2));
+        cursor: pointer;
+      }
+      button:disabled { opacity: .6; cursor: not-allowed; }
+      .hint {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      code {
+        background: #0b1421;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1px 6px;
+      }
+      .typing { color: var(--ok); font-size: 12px; margin-top: 6px; display: none; }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <h2>CertiBot (MVP)</h2>
-      <div class="card">
-        <div class="row">
-          <input id="msg" placeholder="Ex: certificações ativas do Fabiano Garcia" />
-          <button id="send">Enviar</button>
+      <div class="app">
+        <div class="topbar">
+          <div class="brand">CertiBot</div>
+          <div class="badge">RH • Consulta de Certificações</div>
         </div>
-        <div class="hint">
-          Exemplos: <code>certificações ativas do João Silva</code> • <code>quem tem certificação Product Owner válida hoje</code>
+        <div id="chat" class="chat"></div>
+        <div class="composer">
+          <div class="row">
+            <input id="msg" placeholder="Ex.: certificações ativas do João Silva" />
+            <button id="send">Enviar</button>
+          </div>
+          <div id="typing" class="typing">Consultando base de certificações...</div>
+          <div class="hint">
+            Exemplos: <code>certificações ativas do João Silva</code> • <code>quem tem certificação PO válida hoje</code>
+          </div>
         </div>
-        <pre id="out"></pre>
-        <div id="links"></div>
       </div>
     </div>
     <script>
+      const $chat = document.getElementById('chat');
       const $msg = document.getElementById('msg');
-      const $out = document.getElementById('out');
-      const $links = document.getElementById('links');
       const $send = document.getElementById('send');
+      const $typing = document.getElementById('typing');
+
+      function nowLabel() {
+        const d = new Date();
+        return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      }
+
+      function appendMessage(kind, text, evidence) {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg ' + kind;
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = (kind === 'user' ? 'Você' : 'CertiBot') + ' • ' + nowLabel();
+
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = text || '';
+
+        wrap.appendChild(meta);
+        wrap.appendChild(bubble);
+
+        if (Array.isArray(evidence) && evidence.length) {
+          const ev = document.createElement('div');
+          ev.className = 'evidence';
+          for (const item of evidence) {
+            const c = document.createElement('div');
+            c.className = 'ev-card';
+            const a = document.createElement('a');
+            a.href = item.url;
+            a.target = '_blank';
+            a.rel = 'noreferrer';
+            a.textContent = (item.label || 'Evidência') + ' → ' + (item.url || '');
+            c.appendChild(a);
+            ev.appendChild(c);
+          }
+          wrap.appendChild(ev);
+        }
+
+        $chat.appendChild(wrap);
+        $chat.scrollTop = $chat.scrollHeight;
+      }
 
       async function send() {
         const message = ($msg.value || '').trim();
         if (!message) return;
-        $out.textContent = 'Consultando...';
-        $links.innerHTML = '';
+        appendMessage('user', message);
+        $msg.value = '';
+        $send.disabled = true;
+        $typing.style.display = 'block';
+
         try {
           const res = await fetch('/chat', {
             method: 'POST',
@@ -121,32 +304,22 @@ _CHAT_HTML = """<!doctype html>
           let data = null;
           try { data = JSON.parse(text); } catch (e) { data = null; }
           if (!res.ok) {
-            $out.textContent = (data && data.detail) ? String(data.detail) : (text || ('Erro HTTP ' + res.status));
+            appendMessage('bot', (data && data.detail) ? String(data.detail) : (text || ('Erro HTTP ' + res.status)));
             return;
           }
-          $out.textContent = (data && data.answer) ? data.answer : text;
-          const ev = (data && data.evidence) ? data.evidence : [];
-          if (ev.length) {
-            const ul = document.createElement('ul');
-            for (const e of ev) {
-              const li = document.createElement('li');
-              const a = document.createElement('a');
-              a.href = e.url;
-              a.target = '_blank';
-              a.rel = 'noreferrer';
-              a.textContent = e.label + ' → ' + e.url;
-              li.appendChild(a);
-              ul.appendChild(li);
-            }
-            $links.appendChild(ul);
-          }
+          appendMessage('bot', (data && data.answer) ? data.answer : text, (data && data.evidence) ? data.evidence : []);
         } catch (err) {
-          $out.textContent = String(err);
+          appendMessage('bot', String(err));
+        } finally {
+          $send.disabled = false;
+          $typing.style.display = 'none';
+          $msg.focus();
         }
       }
 
       $send.addEventListener('click', send);
       $msg.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+      appendMessage('bot', 'Olá! Posso consultar certificações ativas, expiradas, vencimentos do ano e busca por PO/SM.');
     </script>
   </body>
 </html>
