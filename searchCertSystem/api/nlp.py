@@ -80,6 +80,35 @@ def parse_query(message: str) -> ParsedQuery | None:
                 return ParsedQuery(kind="people_with_cert_expired", cert_hint=cert)
             return ParsedQuery(kind="people_with_cert_active", cert_hint=cert)
 
+    # "certificações ativas e Lucas Paquetá" → consulta por colaborador (antes do branch "cert X" global)
+    # Usa `n` (sem acentos) para casar "certificacoes" mesmo quando o usuário digita "certificações"
+    m_av_e = re.search(
+        r"\b(?:certificacoes|certificacao|certs|certificados)\b.*?"
+        r"\b(?:ativas?|vigentes?|validas?)\s+e\s+([a-zA-Z][a-zA-Z\s\.]{2,})",
+        n,
+        flags=re.IGNORECASE,
+    )
+    if m_av_e:
+        ph = m_av_e.group(1).strip()
+        ph_n = normalize_text(ph)
+        # "e PO" / "e SM" continua sendo busca por tipo de certificação, não por nome
+        if ph_n not in ("po", "sm", "pso", "cspo", "pmp", "itil", "aws") and not re.match(
+            r"^(po|sm|p\.?o\.?|product owner|scrum master)\b",
+            ph,
+            re.IGNORECASE,
+        ):
+            if "expirad" in n or "vencid" in n:
+                return ParsedQuery(kind="certs_by_person_expired", person_hint=ph)
+            if "vencem" in n or "vence" in n:
+                y: int | None = None
+                my = _RE_YEAR.search(n)
+                if my:
+                    y = int(my.group(1))
+                elif "este ano" in n:
+                    y = -1
+                return ParsedQuery(kind="certs_by_person_expiring_year", person_hint=ph, year=y)
+            return ParsedQuery(kind="certs_by_person_active", person_hint=ph)
+
     # consultas curtas/telegráficas sem sujeito, ex:
     # - "certicação de PO"
     # - "certificacao PO ativa"
@@ -109,23 +138,48 @@ def parse_query(message: str) -> ParsedQuery | None:
 
     # pessoa pode aparecer em qualquer lugar:
     # - "certificacoes ativas joao silva"
+    # - "certificacoes ativas e lucas paqueta"
     # - "joao silva tem cert ativa"
     # - "quais certificacoes do joao silva vencem este ano"
     person_hint = None
-    # tenta capturar após "do/da/de" em qualquer ponto (não só no final)
-    m = re.search(r"\b(?:do|da|de)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\.]{2,})", raw, flags=re.IGNORECASE)
-    if m:
-        person_hint = m.group(1).strip()
-    else:
-        # tenta padrão "NOME tem ..."
-        m = re.match(r"^\s*([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\.]{2,})\s+tem\b", raw, flags=re.IGNORECASE)
-        if m:
-            person_hint = m.group(1).strip()
-        else:
-            # tenta pegar o resto após termos de assunto
-            m = re.search(r"\b(?:certificacoes|certificacao|certs|certificados|badges|titulos)\b.*?\b([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\.]{2,})", raw, flags=re.IGNORECASE)
-            if m:
-                person_hint = m.group(1).strip()
+    # "certificações ativas e Lucas Paquetá" (evita capturar "ativas" como nome); `n` = sem acentos
+    m_e = re.search(
+        r"\b(?:certificacoes|certificacao|certs|certificados|badges|titulos)\b.*?"
+        r"\b(?:ativas?|vigentes?|validas?)\s+e\s+([a-zA-Z][a-zA-Z\s\.]{2,})",
+        n,
+        flags=re.IGNORECASE,
+    )
+    if m_e:
+        person_hint = m_e.group(1).strip()
+    if not person_hint:
+        m_tail = re.search(
+            r"\b(?:certificacoes|certificacao|certs|certificados)\b.*?"
+            r"\b(?:ativas?|vigentes?|validas?)\s+([a-zA-Z][a-zA-Z\s\.]{2,})\s*$",
+            n.strip(),
+            flags=re.IGNORECASE,
+        )
+        if m_tail:
+            person_hint = m_tail.group(1).strip()
+    if not person_hint:
+        m_de = re.search(r"\b(?:do|da|de)\s+([a-zA-Z][a-zA-Z\s\.]{2,})", n, flags=re.IGNORECASE)
+        if m_de:
+            person_hint = m_de.group(1).strip()
+    if not person_hint:
+        m_tem = re.match(r"^\s*([a-zA-Z][a-zA-Z\s\.]{2,})\s+tem\b", n, flags=re.IGNORECASE)
+        if m_tem:
+            person_hint = m_tem.group(1).strip()
+    if not person_hint:
+        m_cert = re.search(
+            r"\b(?:certificacoes|certificacao|certs|certificados|badges|titulos)\b.*?"
+            r"(?:\b(?:ativas?|vigentes?|validas?)\s+e\s+)?"
+            r"\b([a-zA-Z][a-zA-Z\s\.]{2,})",
+            n,
+            flags=re.IGNORECASE,
+        )
+        if m_cert:
+            cand = m_cert.group(1).strip()
+            if not re.match(r"^(ativas?|vigentes?|validas?|cert|certs)$", cand, re.IGNORECASE):
+                person_hint = cand
 
     if person_hint:
         if "expirad" in n or "vencid" in n:

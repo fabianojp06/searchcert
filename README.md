@@ -81,7 +81,7 @@ Crie um arquivo `.env` na raiz (não comitar) baseado em `.env.example`.
 
 1. No Google Cloud Console: **habilite a Google Drive API** no projeto da Service Account.
 2. Baixe o JSON da Service Account e salve em `credentials/google-service-account.json`.
-3. No Google Drive: compartilhe a pasta raiz (`GOOGLE_DRIVE_ROOT_FOLDER_ID`) com o `client_email` da Service Account (permissão de leitura).
+3. No Google Drive: compartilhe a pasta raiz (`GOOGLE_DRIVE_ROOT_FOLDER_ID`) com o `client_email` da Service Account (permissão de leitura suficiente para o MVP).
 
 ## Supabase (schema)
 

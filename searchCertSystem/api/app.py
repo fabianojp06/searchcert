@@ -446,7 +446,11 @@ def chat(req: ChatRequest) -> ChatResponse:
             raise HTTPException(status_code=400, detail="Não consegui identificar o nome do colaborador.")
         rows = list_active_certifications_by_person(cfg, person_name)
         if not rows:
-            return ChatResponse(answer=f"Não encontrei certificações ativas para '{person_name}'.", evidence=[], raw={"intent": pq.kind})
+            return ChatResponse(
+                answer="No momento, o funcionário não tem certificações.",
+                evidence=[],
+                raw={"intent": pq.kind},
+            )
 
         lines: list[str] = [f"Certificações ativas de {rows[0].get('colaborador_nome') or person_name}:"]
         evidence: list[EvidenceLink] = []
