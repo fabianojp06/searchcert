@@ -94,3 +94,33 @@ def upsert_certificacao(
         )
     resp.raise_for_status()
 
+
+def upsert_curriculo(
+    cfg: SupabaseConfig,
+    *,
+    colaborador_id: str,
+    link_pdf: str,
+    pdf_file_id: str | None,
+    pdf_file_name: str | None,
+) -> None:
+    """
+    Upsert em `curriculos` por `colaborador_id` (mantém 1 currículo atual por colaborador).
+    """
+    endpoint = cfg.url.rstrip("/") + "/rest/v1/curriculos"
+    payload = [
+        {
+            "colaborador_id": colaborador_id,
+            "link_pdf": link_pdf,
+            "pdf_file_id": pdf_file_id,
+            "pdf_file_name": pdf_file_name,
+        }
+    ]
+    resp = requests.post(
+        endpoint,
+        params={"on_conflict": "colaborador_id"},
+        headers=_headers(cfg, prefer="resolution=merge-duplicates,return=minimal"),
+        json=payload,
+        timeout=30,
+    )
+    resp.raise_for_status()
+

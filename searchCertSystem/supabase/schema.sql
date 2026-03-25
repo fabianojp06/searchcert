@@ -53,3 +53,28 @@ create index if not exists certificacoes_colaborador_id_idx
 create index if not exists certificacoes_nome_certificado_idx
   on public.certificacoes (nome_certificado);
 
+-- Currículo (1 atual por colaborador, com rastreio do PDF)
+create table if not exists public.curriculos (
+  id uuid primary key default gen_random_uuid(),
+  colaborador_id uuid not null references public.colaboradores(id) on delete cascade,
+  link_pdf text not null,
+  pdf_file_id text null,
+  pdf_file_name text null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.curriculos
+  add column if not exists pdf_file_id text;
+alter table public.curriculos
+  add column if not exists pdf_file_name text;
+alter table public.curriculos
+  add column if not exists updated_at timestamptz not null default now();
+
+-- Um currículo "vigente" por colaborador (upsert por colaborador_id)
+create unique index if not exists curriculos_colaborador_id_uq
+  on public.curriculos (colaborador_id);
+
+-- Evita duplicidade de mesmo arquivo em colaboradores distintos
+create unique index if not exists curriculos_pdf_file_id_uq
+  on public.curriculos (pdf_file_id);
+

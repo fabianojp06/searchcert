@@ -107,6 +107,30 @@ def list_all_people(cfg: SupabaseConfig) -> list[str]:
     return out
 
 
+def get_curriculo_by_person(cfg: SupabaseConfig, person_name: str) -> dict[str, Any] | None:
+    """
+    Busca currículo do colaborador por nome (ilike).
+    Prioriza a view/tabela join via PostgREST.
+    """
+    params = {
+        "select": "link_pdf,pdf_file_id,pdf_file_name,colaboradores!inner(nome)",
+        "colaboradores.nome": f"ilike.%{person_name}%",
+        "order": "updated_at.desc",
+        "limit": "1",
+    }
+    rows = _get(cfg, "/rest/v1/curriculos", params)
+    if not rows:
+        return None
+    row = rows[0]
+    col = row.get("colaboradores") or {}
+    return {
+        "colaborador_nome": col.get("nome"),
+        "link_pdf": row.get("link_pdf"),
+        "pdf_file_id": row.get("pdf_file_id"),
+        "pdf_file_name": row.get("pdf_file_name"),
+    }
+
+
 def list_all_active_certifications(cfg: SupabaseConfig) -> list[dict[str, Any]]:
     params = {
         "select": "colaborador_nome,nome_certificado,data_emissao,data_validade,link_pdf,pdf_file_id",

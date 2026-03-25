@@ -4,15 +4,16 @@ import argparse
 import json
 import os
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 
-from searchCertSystem.worker.us002.drive_client import DriveClient, DriveClientConfig
+from searchCertSystem.worker.us002.drive_client import PDF_MIME_TYPE, DriveClient, DriveClientConfig
 from searchCertSystem.worker.us002.mapper import MapperConfig, map_drive_structure
 from searchCertSystem.worker.us003.process_us002 import Us003Config, process_us002_payload
-from searchCertSystem.worker.us003.supabase_repo import SupabaseConfig, upsert_certificacao, upsert_colaborador
+from searchCertSystem.worker.us003.supabase_repo import SupabaseConfig, upsert_certificacao, upsert_colaborador, upsert_curriculo
 
 
 def _as_bool(value: object, default: bool = False) -> bool:
@@ -72,6 +73,34 @@ def _filter_us002_payload_incremental(us002_payload: dict[str, Any], processed_i
     return out
 
 
+def _norm(s: str) -> str:
+    s = s.strip().lower()
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return s
+
+
+def _is_curriculo_name(file_name: str | None) -> bool:
+    if not file_name:
+        return False
+    n = _norm(file_name)
+    return ("curriculo" in n) or ("resume" in n) or ("curriculum vitae" in n) or (" cv " in f" {n} ")
+
+
+def _find_curriculo_pdf_for_colab(drive: DriveClient, colab_folder_id: str) -> dict[str, Any] | None:
+    # Currículo esperado diretamente na pasta do colaborador
+    fields = "nextPageToken, files(id,name,mimeType,webViewLink,modifiedTime)"
+    candidates: list[dict[str, Any]] = []
+    for item in drive.iter_children(colab_folder_id, mime_type=PDF_MIME_TYPE, fields=fields):
+        if _is_curriculo_name(item.get("name")):
+            candidates.append(item)
+    if not candidates:
+        return None
+    # pega o mais recente por modifiedTime quando disponível
+    candidates.sort(key=lambda x: str(x.get("modifiedTime") or ""), reverse=True)
+    return candidates[0]
+
+
 def _run_once(
     *,
     out_us002: Path,
@@ -118,12 +147,14 @@ def _run_once(
     sb = SupabaseConfig(url=url, service_role_key=key)
 
     sent = 0
+    colab_id_by_folder: dict[str, str] = {}
     for colab in us003_payload.get("colaboradores", []) or []:
         colab_nome = colab.get("nome")
         colab_folder_id = colab.get("colaborador_folder_id")
         if not colab_nome or not colab_folder_id:
             continue
         colaborador_id = upsert_colaborador(sb, nome=colab_nome, link_pasta=colab_folder_id)
+        colab_id_by_folder[str(colab_folder_id)] = colaborador_id
         for cert in colab.get("certificacoes", []) or []:
             cert_nome = cert.get("nome")
             if not cert_nome:
@@ -145,9 +176,36 @@ def _run_once(
                 if pdf.get("file_id"):
                     processed_ids.add(str(pdf["file_id"]))
 
+    # Currículos: processa PDFs "curriculo/cv/resume" na pasta do colaborador
+    curriculos_sent = 0
+    for colab in us002_payload.get("colaboradores", []) or []:
+        folder_id = str(colab.get("colaborador_folder_id") or "")
+        if not folder_id:
+            continue
+        colaborador_id = colab_id_by_folder.get(folder_id)
+        if not colaborador_id:
+            continue
+        curr = _find_curriculo_pdf_for_colab(drive, folder_id)
+        if not curr:
+            continue
+        file_id = curr.get("id")
+        if file_id and str(file_id) in processed_ids:
+            continue
+
+        upsert_curriculo(
+            sb,
+            colaborador_id=colaborador_id,
+            link_pdf=curr.get("webViewLink") or "",
+            pdf_file_id=file_id,
+            pdf_file_name=curr.get("name"),
+        )
+        curriculos_sent += 1
+        if file_id:
+            processed_ids.add(str(file_id))
+
     _save_checkpoint(checkpoint_file, processed_ids)
 
-    return (len(us002_payload.get("colaboradores", []) or []), sent)
+    return (len(us002_payload.get("colaboradores", []) or []), sent + curriculos_sent)
 
 
 def main() -> int:

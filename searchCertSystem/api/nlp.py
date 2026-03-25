@@ -41,6 +41,16 @@ def parse_query(message: str) -> ParsedQuery | None:
     if re.search(r"\bme mostre todos\b.*\bcertificacoes\b.*\bativas\b", n) or re.search(r"\btodos\b.*\bcertificacoes\b.*\bativas\b", n):
         return ParsedQuery(kind="list_all_active")
 
+    # currículo / cv por pessoa
+    if any(tok in n for tok in ("curriculo", "curriculum", "resume", " cv ")) and any(tok in n for tok in ("exiba", "mostre", "me mostre", "mostrar", "traga", "abre", "abrir")):
+        m = re.search(r"\b(?:do|da|de)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\.]{2,})", message, flags=re.IGNORECASE)
+        if m:
+            return ParsedQuery(kind="curriculo_by_person", person_hint=m.group(1).strip())
+        # fallback: tenta nome no começo
+        m = re.match(r"^\s*([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\.]{2,})\b", message, flags=re.IGNORECASE)
+        if m:
+            return ParsedQuery(kind="curriculo_by_person", person_hint=m.group(1).strip())
+
     # contagem
     if n.startswith("quantos"):
         m = _RE_CERT.search(raw)

@@ -15,6 +15,7 @@ from searchCertSystem.api.supabase_query import (
     list_active_certifications_by_person,
     list_all_active_certifications,
     list_all_people,
+    get_curriculo_by_person,
     list_expired_certifications_by_person,
     list_expiring_year_by_person,
     list_people_with_cert_expired,
@@ -351,7 +352,8 @@ def chat(req: ChatRequest) -> ChatResponse:
                 "- 'Joao silva tem cert ativa?'\n"
                 "- 'Quem tem certificação PO válida hoje?'\n"
                 "- 'Quantos POs certificados temos hoje?'\n"
-                "- 'Me mostre todos os funcionários com certificações ativas.'"
+                "- 'Me mostre todos os funcionários com certificações ativas.'\n"
+                "- 'Exiba o currículo de Fabiano Santos Garcia.'"
             ),
         )
 
@@ -379,6 +381,22 @@ def chat(req: ChatRequest) -> ChatResponse:
             if link:
                 evidence.append(EvidenceLink(label=f"{nome} - {cert}", url=link))
         return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)})
+
+    if pq.kind == "curriculo_by_person":
+        if not person_name:
+            raise HTTPException(status_code=400, detail="Não consegui identificar o nome do colaborador para currículo.")
+        row = get_curriculo_by_person(cfg, person_name)
+        if not row:
+            return ChatResponse(answer=f"Não encontrei currículo para '{person_name}'.", evidence=[], raw={"intent": pq.kind})
+        nome = row.get("colaborador_nome") or person_name
+        link = row.get("link_pdf")
+        if not link:
+            return ChatResponse(answer=f"Encontrei referência de currículo de '{nome}', mas sem link.", evidence=[], raw={"intent": pq.kind})
+        return ChatResponse(
+            answer=f"Encontrei o currículo de {nome}.",
+            evidence=[EvidenceLink(label=f"Currículo - {nome}", url=link)],
+            raw={"intent": pq.kind},
+        )
 
     if pq.kind == "count_people_with_cert_active":
         if not pq.cert_hint:
