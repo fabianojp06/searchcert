@@ -1,0 +1,55 @@
+-- US001 - Schema inicial (Supabase / PostgreSQL)
+-- Tabelas:
+-- - colaboradores(id, nome, link_pasta)
+-- - certificacoes(id, colaborador_id, nome_certificado, data_emissao, data_validade, link_pdf)
+--
+-- Notas de robustez para o worker:
+-- - `link_pasta` armazena o folderId do Drive (ou URL) e é UNIQUE para permitir upsert do colaborador.
+-- - `pdf_file_id` ajuda a evitar duplicatas do mesmo PDF no Drive (UNIQUE).
+
+create extension if not exists "pgcrypto";
+
+create table if not exists public.colaboradores (
+  id uuid primary key default gen_random_uuid(),
+  nome text not null,
+  link_pasta text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Se a tabela já existia (schema antigo), garante a coluna necessária
+alter table public.colaboradores
+  add column if not exists link_pasta text;
+
+create unique index if not exists colaboradores_link_pasta_uq
+  on public.colaboradores (link_pasta);
+
+create table if not exists public.certificacoes (
+  id uuid primary key default gen_random_uuid(),
+  colaborador_id uuid not null references public.colaboradores(id) on delete cascade,
+  nome_certificado text not null,
+  data_emissao date null,
+  data_validade date null,
+  link_pdf text not null,
+  -- campos extras para evitar duplicação e facilitar auditoria
+  pdf_file_id text null,
+  pdf_file_name text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Se a tabela já existia (schema antigo), garante colunas novas
+alter table public.certificacoes
+  add column if not exists pdf_file_id text;
+alter table public.certificacoes
+  add column if not exists pdf_file_name text;
+
+create unique index if not exists certificacoes_pdf_file_id_uq
+  on public.certificacoes (pdf_file_id);
+
+create index if not exists certificacoes_colaborador_id_idx
+  on public.certificacoes (colaborador_id);
+
+create index if not exists certificacoes_nome_certificado_idx
+  on public.certificacoes (nome_certificado);
+

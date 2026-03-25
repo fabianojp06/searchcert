@@ -1,0 +1,2 @@
+"""CertiBot - SearchCertSystem package."""
+
