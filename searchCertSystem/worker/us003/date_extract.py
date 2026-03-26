@@ -1,3 +1,6 @@
+"""
+Extrai datas de emissão e validade do texto do certificado (regex PT/EN + heurísticas de fallback).
+"""
 from __future__ import annotations
 
 import re

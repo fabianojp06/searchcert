@@ -1,3 +1,4 @@
+"""CLI do US003: processa `us002.json`, gera `us003.json` e opcionalmente envia ao Supabase."""
 from __future__ import annotations
 
 import argparse

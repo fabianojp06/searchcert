@@ -1,3 +1,7 @@
+"""
+Interpretação de perguntas em linguagem natural (regras + regex sobre texto normalizado).
+Define intenções (por pessoa, por certificação, listas globais, currículo) e `best_match_person` (RapidFuzz).
+"""
 from __future__ import annotations
 
 import re

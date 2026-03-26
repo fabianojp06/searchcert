@@ -1,3 +1,7 @@
+"""
+Consultas de leitura ao Supabase (PostgREST) para o chat: certificações ativas/expiradas,
+contagens, currículos. Usa view `v_certificacoes` quando existe; senão faz fallback com joins.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,6 +33,43 @@ def _get(cfg: SupabaseConfig, path: str, params: dict[str, Any]) -> list[dict[st
     if not isinstance(data, list):
         raise RuntimeError("Resposta inesperada do Supabase (não é lista).")
     return data
+
+
+def insert_chat_log(
+    cfg: SupabaseConfig,
+    *,
+    message: str,
+    normalized_message: str | None,
+    intent: str | None,
+    person_hint: str | None,
+    cert_hint: str | None,
+    answer: str | None,
+    evidence: list[dict[str, Any]] | None,
+    success: bool,
+    http_status: int,
+    error_detail: str | None,
+) -> None:
+    """
+    Insere auditoria da chamada do chat em `chat_logs`.
+    Função best-effort: caller decide se deve ignorar falhas.
+    """
+    endpoint = cfg.url.rstrip("/") + "/rest/v1/chat_logs"
+    payload = [
+        {
+            "message": message,
+            "normalized_message": normalized_message,
+            "intent": intent,
+            "person_hint": person_hint,
+            "cert_hint": cert_hint,
+            "answer": answer,
+            "evidence": evidence,
+            "success": success,
+            "http_status": int(http_status),
+            "error_detail": error_detail,
+        }
+    ]
+    resp = requests.post(endpoint, headers=_headers(cfg), json=payload, timeout=30)
+    resp.raise_for_status()
 
 
 def _cert_aliases(cert_name: str) -> list[str]:

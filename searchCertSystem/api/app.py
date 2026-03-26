@@ -1,3 +1,7 @@
+"""
+US004 — API FastAPI do CertiBot: UI do chat (`GET /`), `POST /chat` com NLP (`nlp`)
+e consultas somente leitura ao Supabase (`supabase_query`).
+"""
 from __future__ import annotations
 
 import datetime as _dt
@@ -9,9 +13,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from searchCertSystem.api.nlp import best_match_person, parse_query
+from searchCertSystem.api.nlp import best_match_person, normalize_text, parse_query
 from searchCertSystem.api.supabase_query import (
     SupabaseConfig,
+    insert_chat_log,
     list_active_certifications_by_person,
     list_all_active_certifications,
     list_all_people,
@@ -60,6 +65,48 @@ def _fmt_date(d: str | None) -> str:
         yyyy, mm, dd = d.split("-")
         return f"{dd}/{mm}/{yyyy}"
     return d
+
+
+def _truncate_text(value: str | None, max_len: int = 4000) -> str | None:
+    if value is None:
+        return None
+    s = str(value)
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3] + "..."
+
+
+def _safe_insert_chat_log(
+    cfg: SupabaseConfig,
+    *,
+    message: str,
+    normalized_message: str | None,
+    intent: str | None,
+    person_hint: str | None,
+    cert_hint: str | None,
+    answer: str | None,
+    evidence: list[EvidenceLink] | None,
+    success: bool,
+    http_status: int,
+    error_detail: str | None,
+) -> None:
+    # Logging best-effort: falha no log não pode quebrar o chat.
+    try:
+        insert_chat_log(
+            cfg,
+            message=_truncate_text(message, 4000) or "",
+            normalized_message=_truncate_text(normalized_message, 4000),
+            intent=intent,
+            person_hint=_truncate_text(person_hint, 500),
+            cert_hint=_truncate_text(cert_hint, 500),
+            answer=_truncate_text(answer, 4000),
+            evidence=[{"label": e.label, "url": e.url} for e in (evidence or [])],
+            success=success,
+            http_status=http_status,
+            error_detail=_truncate_text(error_detail, 4000),
+        )
+    except Exception:
+        return
 
 
 @app.get("/health")
@@ -340,11 +387,48 @@ def chat_get() -> RedirectResponse:
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
+    # Intenção (nlp) → match de colaborador (fuzzy) → consulta Supabase conforme `pq.kind`
+    cfg = _supabase_cfg()
+    normalized_message = normalize_text(req.message)
     pq = parse_query(req.message)
+    person_name: str | None = None
+
+    def _ok(resp: ChatResponse) -> ChatResponse:
+        _safe_insert_chat_log(
+            cfg,
+            message=req.message,
+            normalized_message=normalized_message,
+            intent=(resp.raw or {}).get("intent") if isinstance(resp.raw, dict) else (pq.kind if pq else None),
+            person_hint=person_name or (pq.person_hint if pq else None),
+            cert_hint=pq.cert_hint if pq else None,
+            answer=resp.answer,
+            evidence=resp.evidence,
+            success=True,
+            http_status=200,
+            error_detail=None,
+        )
+        return resp
+
+    def _err(status: int, detail: str) -> HTTPException:
+        _safe_insert_chat_log(
+            cfg,
+            message=req.message,
+            normalized_message=normalized_message,
+            intent=pq.kind if pq else None,
+            person_hint=person_name or (pq.person_hint if pq else None),
+            cert_hint=pq.cert_hint if pq else None,
+            answer=None,
+            evidence=None,
+            success=False,
+            http_status=status,
+            error_detail=detail,
+        )
+        return HTTPException(status_code=status, detail=detail)
+
     if not pq:
-        raise HTTPException(
-            status_code=400,
-            detail=(
+        raise _err(
+            400,
+            (
                 "Não entendi.\n\n"
                 "Exemplos:\n"
                 "- 'Quais as certificações vigentes do João Silva?'\n"
@@ -357,150 +441,169 @@ def chat(req: ChatRequest) -> ChatResponse:
             ),
         )
 
-    cfg = _supabase_cfg()
-
     # resolve person with fuzzy matching (para aguentar variações/typos/sem acento)
-    person_name = None
     if pq.person_hint:
         candidates = list_all_people(cfg)
         # tenta casar pelo hint; se falhar, tenta casar pela frase inteira (nome em qualquer posição)
         person_name = best_match_person(pq.person_hint, candidates) or best_match_person(req.message, candidates) or pq.person_hint
 
-    if pq.kind == "list_all_active":
-        rows = list_all_active_certifications(cfg)
-        if not rows:
-            return ChatResponse(answer="Não encontrei certificações ativas no momento.", evidence=[], raw={"intent": pq.kind})
-        lines: list[str] = ["Funcionários com certificações ativas:"]
-        evidence: list[EvidenceLink] = []
-        for r in rows:
-            nome = r.get("colaborador_nome") or "-"
-            cert = r.get("nome_certificado") or "-"
-            va = _fmt_date(r.get("data_validade"))
-            lines.append(f"- {nome}: {cert} (Validade: {va})")
-            link = r.get("link_pdf")
-            if link:
-                evidence.append(EvidenceLink(label=f"{nome} - {cert}", url=link))
-        return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)})
+    try:
+        if pq.kind == "list_all_active":
+            rows = list_all_active_certifications(cfg)
+            if not rows:
+                return _ok(ChatResponse(answer="Não encontrei certificações ativas no momento.", evidence=[], raw={"intent": pq.kind}))
+            lines: list[str] = ["Funcionários com certificações ativas:"]
+            evidence: list[EvidenceLink] = []
+            for r in rows:
+                nome = r.get("colaborador_nome") or "-"
+                cert = r.get("nome_certificado") or "-"
+                va = _fmt_date(r.get("data_validade"))
+                lines.append(f"- {nome}: {cert} (Validade: {va})")
+                link = r.get("link_pdf")
+                if link:
+                    evidence.append(EvidenceLink(label=f"{nome} - {cert}", url=link))
+            return _ok(ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)}))
 
-    if pq.kind == "curriculo_by_person":
-        if not person_name:
-            raise HTTPException(status_code=400, detail="Não consegui identificar o nome do colaborador para currículo.")
-        row = get_curriculo_by_person(cfg, person_name)
-        if not row:
-            return ChatResponse(answer=f"Não encontrei currículo para '{person_name}'.", evidence=[], raw={"intent": pq.kind})
-        nome = row.get("colaborador_nome") or person_name
-        link = row.get("link_pdf")
-        if not link:
-            return ChatResponse(answer=f"Encontrei referência de currículo de '{nome}', mas sem link.", evidence=[], raw={"intent": pq.kind})
-        return ChatResponse(
-            answer=f"Encontrei o currículo de {nome}.",
-            evidence=[EvidenceLink(label=f"Currículo - {nome}", url=link)],
-            raw={"intent": pq.kind},
-        )
-
-    if pq.kind == "count_people_with_cert_active":
-        if not pq.cert_hint:
-            raise HTTPException(status_code=400, detail="Faltou informar a certificação para contagem.")
-        n = count_people_with_cert_active(cfg, pq.cert_hint)
-        return ChatResponse(answer=f"Temos {n} pessoa(s) com '{pq.cert_hint}' válida hoje.", evidence=[], raw={"intent": pq.kind, "count": n})
-
-    if pq.kind == "people_with_cert_active":
-        if not pq.cert_hint:
-            raise HTTPException(status_code=400, detail="Faltou informar a certificação.")
-        rows = list_people_with_valid_certification(cfg, pq.cert_hint)
-        if not rows:
-            return ChatResponse(answer=f"Não encontrei ninguém com certificação '{pq.cert_hint}' válida hoje.", evidence=[], raw={"intent": pq.kind})
-
-        lines: list[str] = [f"Pessoas com certificação '{pq.cert_hint}' válida hoje:"]
-        evidence: list[EvidenceLink] = []
-        for r in rows:
-            nome = r.get("colaborador_nome") or "-"
-            cert = r.get("nome_certificado") or pq.cert_hint
-            va = _fmt_date(r.get("data_validade"))
-            lines.append(f"- {nome} (Validade: {va})")
-            link = r.get("link_pdf")
-            if link:
-                evidence.append(EvidenceLink(label=f"{nome} - {cert}", url=link))
-
-        return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)})
-
-    if pq.kind == "people_with_cert_expired":
-        if not pq.cert_hint:
-            raise HTTPException(status_code=400, detail="Faltou informar a certificação.")
-        rows = list_people_with_cert_expired(cfg, pq.cert_hint)
-        if not rows:
-            return ChatResponse(answer=f"Não encontrei ninguém com certificação '{pq.cert_hint}' expirada.", evidence=[], raw={"intent": pq.kind})
-        lines: list[str] = [f"Pessoas com certificação '{pq.cert_hint}' expirada:"]
-        evidence: list[EvidenceLink] = []
-        for r in rows:
-            nome = r.get("colaborador_nome") or "-"
-            va = _fmt_date(r.get("data_validade"))
-            lines.append(f"- {nome} (Venceu em: {va})")
-            link = r.get("link_pdf")
-            if link:
-                evidence.append(EvidenceLink(label=f"{nome}", url=link))
-        return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)})
-
-    if pq.kind == "certs_by_person_active":
-        if not person_name:
-            raise HTTPException(status_code=400, detail="Não consegui identificar o nome do colaborador.")
-        rows = list_active_certifications_by_person(cfg, person_name)
-        if not rows:
-            return ChatResponse(
-                answer="No momento, o funcionário não tem certificações.",
-                evidence=[],
-                raw={"intent": pq.kind},
+        if pq.kind == "curriculo_by_person":
+            if not person_name:
+                raise _err(400, "Não consegui identificar o nome do colaborador para currículo.")
+            row = get_curriculo_by_person(cfg, person_name)
+            if not row:
+                return _ok(ChatResponse(answer=f"Não encontrei currículo para '{person_name}'.", evidence=[], raw={"intent": pq.kind}))
+            nome = row.get("colaborador_nome") or person_name
+            link = row.get("link_pdf")
+            if not link:
+                return _ok(ChatResponse(answer=f"Encontrei referência de currículo de '{nome}', mas sem link.", evidence=[], raw={"intent": pq.kind}))
+            return _ok(
+                ChatResponse(
+                    answer=f"Encontrei o currículo de {nome}.",
+                    evidence=[EvidenceLink(label=f"Currículo - {nome}", url=link)],
+                    raw={"intent": pq.kind},
+                )
             )
 
-        lines: list[str] = [f"Certificações ativas de {rows[0].get('colaborador_nome') or person_name}:"]
-        evidence: list[EvidenceLink] = []
-        for r in rows:
-            cert = r.get("nome_certificado") or "-"
-            em = _fmt_date(r.get("data_emissao"))
-            va = _fmt_date(r.get("data_validade"))
-            lines.append(f"- {cert} (Emissão: {em} | Validade: {va})")
-            link = r.get("link_pdf")
-            if link:
-                evidence.append(EvidenceLink(label=f"{cert}", url=link))
+        if pq.kind == "count_people_with_cert_active":
+            if not pq.cert_hint:
+                raise _err(400, "Faltou informar a certificação para contagem.")
+            n = count_people_with_cert_active(cfg, pq.cert_hint)
+            return _ok(ChatResponse(answer=f"Temos {n} pessoa(s) com '{pq.cert_hint}' válida hoje.", evidence=[], raw={"intent": pq.kind, "count": n}))
 
-        return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)})
+        if pq.kind == "people_with_cert_active":
+            if not pq.cert_hint:
+                raise _err(400, "Faltou informar a certificação.")
+            rows = list_people_with_valid_certification(cfg, pq.cert_hint)
+            if not rows:
+                return _ok(ChatResponse(answer=f"Não encontrei ninguém com certificação '{pq.cert_hint}' válida hoje.", evidence=[], raw={"intent": pq.kind}))
 
-    if pq.kind == "certs_by_person_expired":
-        if not person_name:
-            raise HTTPException(status_code=400, detail="Não consegui identificar o nome do colaborador.")
-        rows = list_expired_certifications_by_person(cfg, person_name)
-        if not rows:
-            return ChatResponse(answer=f"Não encontrei certificações expiradas para '{person_name}'.", evidence=[], raw={"intent": pq.kind})
-        lines: list[str] = [f"Certificações expiradas de {rows[0].get('colaborador_nome') or person_name}:"]
-        evidence: list[EvidenceLink] = []
-        for r in rows:
-            cert = r.get("nome_certificado") or "-"
-            va = _fmt_date(r.get("data_validade"))
-            lines.append(f"- {cert} (Venceu em: {va})")
-            link = r.get("link_pdf")
-            if link:
-                evidence.append(EvidenceLink(label=f"{cert}", url=link))
-        return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)})
+            lines: list[str] = [f"Pessoas com certificação '{pq.cert_hint}' válida hoje:"]
+            evidence: list[EvidenceLink] = []
+            for r in rows:
+                nome = r.get("colaborador_nome") or "-"
+                cert = r.get("nome_certificado") or pq.cert_hint
+                va = _fmt_date(r.get("data_validade"))
+                lines.append(f"- {nome} (Validade: {va})")
+                link = r.get("link_pdf")
+                if link:
+                    evidence.append(EvidenceLink(label=f"{nome} - {cert}", url=link))
 
-    if pq.kind == "certs_by_person_expiring_year":
-        if not person_name:
-            raise HTTPException(status_code=400, detail="Não consegui identificar o nome do colaborador.")
-        year = pq.year
-        if year in (None, -1):
-            year = _dt.date.today().year
-        rows = list_expiring_year_by_person(cfg, person_name, year)
-        if not rows:
-            return ChatResponse(answer=f"Não encontrei certificações de '{person_name}' que vencem em {year}.", evidence=[], raw={"intent": pq.kind})
-        lines: list[str] = [f"Certificações de {rows[0].get('colaborador_nome') or person_name} que vencem em {year}:"]
-        evidence: list[EvidenceLink] = []
-        for r in rows:
-            cert = r.get("nome_certificado") or "-"
-            va = _fmt_date(r.get("data_validade"))
-            lines.append(f"- {cert} (Validade: {va})")
-            link = r.get("link_pdf")
-            if link:
-                evidence.append(EvidenceLink(label=f"{cert}", url=link))
-        return ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows), "year": year})
+            return _ok(ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)}))
 
-    raise HTTPException(status_code=400, detail="Intent não suportada.")
+        if pq.kind == "people_with_cert_expired":
+            if not pq.cert_hint:
+                raise _err(400, "Faltou informar a certificação.")
+            rows = list_people_with_cert_expired(cfg, pq.cert_hint)
+            if not rows:
+                return _ok(ChatResponse(answer=f"Não encontrei ninguém com certificação '{pq.cert_hint}' expirada.", evidence=[], raw={"intent": pq.kind}))
+            lines: list[str] = [f"Pessoas com certificação '{pq.cert_hint}' expirada:"]
+            evidence: list[EvidenceLink] = []
+            for r in rows:
+                nome = r.get("colaborador_nome") or "-"
+                va = _fmt_date(r.get("data_validade"))
+                lines.append(f"- {nome} (Venceu em: {va})")
+                link = r.get("link_pdf")
+                if link:
+                    evidence.append(EvidenceLink(label=f"{nome}", url=link))
+            return _ok(ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)}))
+
+        if pq.kind == "certs_by_person_active":
+            if not person_name:
+                raise _err(400, "Não consegui identificar o nome do colaborador.")
+            rows = list_active_certifications_by_person(cfg, person_name)
+            if not rows:
+                return _ok(
+                    ChatResponse(
+                        answer="No momento, o funcionário não tem certificações.",
+                        evidence=[],
+                        raw={"intent": pq.kind},
+                    )
+                )
+
+            lines: list[str] = [f"Certificações ativas de {rows[0].get('colaborador_nome') or person_name}:"]
+            evidence: list[EvidenceLink] = []
+            for r in rows:
+                cert = r.get("nome_certificado") or "-"
+                em = _fmt_date(r.get("data_emissao"))
+                va = _fmt_date(r.get("data_validade"))
+                lines.append(f"- {cert} (Emissão: {em} | Validade: {va})")
+                link = r.get("link_pdf")
+                if link:
+                    evidence.append(EvidenceLink(label=f"{cert}", url=link))
+
+            return _ok(ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)}))
+
+        if pq.kind == "certs_by_person_expired":
+            if not person_name:
+                raise _err(400, "Não consegui identificar o nome do colaborador.")
+            rows = list_expired_certifications_by_person(cfg, person_name)
+            if not rows:
+                return _ok(ChatResponse(answer=f"Não encontrei certificações expiradas para '{person_name}'.", evidence=[], raw={"intent": pq.kind}))
+            lines: list[str] = [f"Certificações expiradas de {rows[0].get('colaborador_nome') or person_name}:"]
+            evidence: list[EvidenceLink] = []
+            for r in rows:
+                cert = r.get("nome_certificado") or "-"
+                va = _fmt_date(r.get("data_validade"))
+                lines.append(f"- {cert} (Venceu em: {va})")
+                link = r.get("link_pdf")
+                if link:
+                    evidence.append(EvidenceLink(label=f"{cert}", url=link))
+            return _ok(ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows)}))
+
+        if pq.kind == "certs_by_person_expiring_year":
+            if not person_name:
+                raise _err(400, "Não consegui identificar o nome do colaborador.")
+            year = pq.year
+            if year in (None, -1):
+                year = _dt.date.today().year
+            rows = list_expiring_year_by_person(cfg, person_name, year)
+            if not rows:
+                return _ok(ChatResponse(answer=f"Não encontrei certificações de '{person_name}' que vencem em {year}.", evidence=[], raw={"intent": pq.kind}))
+            lines: list[str] = [f"Certificações de {rows[0].get('colaborador_nome') or person_name} que vencem em {year}:"]
+            evidence: list[EvidenceLink] = []
+            for r in rows:
+                cert = r.get("nome_certificado") or "-"
+                va = _fmt_date(r.get("data_validade"))
+                lines.append(f"- {cert} (Validade: {va})")
+                link = r.get("link_pdf")
+                if link:
+                    evidence.append(EvidenceLink(label=f"{cert}", url=link))
+            return _ok(ChatResponse(answer="\n".join(lines), evidence=evidence, raw={"intent": pq.kind, "count": len(rows), "year": year}))
+
+        raise _err(400, "Intent não suportada.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        _safe_insert_chat_log(
+            cfg,
+            message=req.message,
+            normalized_message=normalized_message,
+            intent=pq.kind if pq else None,
+            person_hint=person_name or (pq.person_hint if pq else None),
+            cert_hint=pq.cert_hint if pq else None,
+            answer=None,
+            evidence=None,
+            success=False,
+            http_status=500,
+            error_detail=f"Erro interno: {e}",
+        )
+        raise
 

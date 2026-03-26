@@ -1,3 +1,6 @@
+"""
+US003 — Consome o JSON do US002: baixa cada PDF, extrai texto/datas e gera payload consolidado.
+"""
 from __future__ import annotations
 
 import datetime as _dt

@@ -27,6 +27,7 @@ O fluxo do MVP é:
 - `searchCertSystem/supabase/schema.sql`: SQL do schema (US001)
 - `output/`: arquivos gerados (ignorados no git)
 - `credentials/`: credencial do Google (ignoradas no git)
+- `docs/DOCUMENTACAO_TECNICA.md`: referência dos arquivos principais e responsabilidades
 
 ## Segurança (GitHub)
 
@@ -94,6 +95,25 @@ Ele cria:
 - `public.colaboradores` (com `link_pasta` UNIQUE para upsert)
 - `public.certificacoes` (FK + `pdf_file_id` UNIQUE para evitar duplicatas)
 - `public.curriculos` (1 currículo vigente por colaborador, com `pdf_file_id`)
+- `public.chat_logs` (auditoria de perguntas e respostas do `POST /chat`)
+
+### Auditoria de buscas do chat
+
+Cada requisição ao `POST /chat` é registrada na tabela `public.chat_logs` com:
+
+- pergunta original (`message`) e normalizada (`normalized_message`)
+- intenção detectada (`intent`) e hints (`person_hint`, `cert_hint`)
+- retorno (`answer`, `evidence`)
+- status (`success`, `http_status`) e erro (`error_detail`, quando houver)
+
+Consulta rápida:
+
+```sql
+select created_at, intent, success, http_status, message, answer
+from public.chat_logs
+order by created_at desc
+limit 20;
+```
 
 ## US002 — Mapear Drive → `output/us002.json`
 

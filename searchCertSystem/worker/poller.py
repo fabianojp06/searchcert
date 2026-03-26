@@ -1,3 +1,6 @@
+"""
+Worker agendado: US002 → US003 → upsert Supabase + checkpoint incremental; currículos na pasta do colaborador.
+"""
 from __future__ import annotations
 
 import argparse

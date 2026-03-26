@@ -1,3 +1,4 @@
+"""Tipos compartilhados do US002 (metadados de arquivo Drive e links de PDF)."""
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,3 +1,4 @@
+"""CLI do US002: mapeia o Drive e grava JSON (`python -m searchCertSystem.worker.us002`)."""
 from __future__ import annotations
 
 import argparse

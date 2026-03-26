@@ -1,2 +1,2 @@
-"""US002 - Google Drive folder mapping."""
+"""US002 — Mapeamento de pastas e PDFs no Google Drive (`mapper`, `drive_client`)."""
 

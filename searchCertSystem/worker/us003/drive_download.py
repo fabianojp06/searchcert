@@ -1,3 +1,4 @@
+"""Download de PDF do Drive reutilizando `DriveClient` do US002."""
 from __future__ import annotations
 
 from searchCertSystem.worker.us002.drive_client import DriveClient

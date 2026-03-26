@@ -1,3 +1,4 @@
+"""Leitura de texto e contagem de páginas em PDF via PyMuPDF."""
 from __future__ import annotations
 
 import fitz  # PyMuPDF

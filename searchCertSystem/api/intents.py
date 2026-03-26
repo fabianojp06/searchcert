@@ -1,3 +1,4 @@
+"""Compatibilidade: delega detecção de intenção para `nlp.parse_query`."""
 from __future__ import annotations
 
 # Mantido por compatibilidade; a detecção principal agora está em `nlp.py`.

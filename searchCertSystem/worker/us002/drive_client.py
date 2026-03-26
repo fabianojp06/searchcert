@@ -1,3 +1,7 @@
+"""
+Cliente Google Drive API v3 (somente leitura): listar filhos de pasta e baixar bytes por `file_id`.
+Usado por US002, US003 e poller.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

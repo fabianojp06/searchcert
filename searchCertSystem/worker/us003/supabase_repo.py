@@ -1,3 +1,6 @@
+"""
+Persistência no Supabase (PostgREST): upserts em `colaboradores`, `certificacoes` e `curriculos`.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

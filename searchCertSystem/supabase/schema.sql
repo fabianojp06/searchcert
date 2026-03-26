@@ -78,3 +78,28 @@ create unique index if not exists curriculos_colaborador_id_uq
 create unique index if not exists curriculos_pdf_file_id_uq
   on public.curriculos (pdf_file_id);
 
+-- Auditoria do chat (pergunta -> retorno)
+create table if not exists public.chat_logs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  message text not null,
+  normalized_message text null,
+  intent text null,
+  person_hint text null,
+  cert_hint text null,
+  answer text null,
+  evidence jsonb null,
+  success boolean not null default false,
+  http_status integer not null,
+  error_detail text null
+);
+
+create index if not exists chat_logs_created_at_idx
+  on public.chat_logs (created_at desc);
+
+create index if not exists chat_logs_intent_idx
+  on public.chat_logs (intent);
+
+create index if not exists chat_logs_success_idx
+  on public.chat_logs (success);
+

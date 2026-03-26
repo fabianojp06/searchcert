@@ -1,3 +1,6 @@
+"""
+US002 — Percorre a hierarquia Raiz → Colaborador → Certificação → PDFs (recursivo) e monta o JSON do mapa do Drive.
+"""
 from __future__ import annotations
 
 import datetime as _dt
@@ -76,6 +79,7 @@ def map_drive_structure(
     *,
     include_links: bool = True,
 ) -> dict[str, Any]:
+    """Monta o JSON do mapa: colaboradores → pastas de certificação → PDFs (com links se `include_links`)."""
     colaboradores = list_direct_folders(drive, config.root_folder_id)
 
     out_colabs: list[dict[str, Any]] = []
