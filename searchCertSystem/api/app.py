@@ -17,6 +17,7 @@ from searchCertSystem.api.nlp import best_match_person, normalize_text, parse_qu
 from searchCertSystem.api.supabase_query import (
     SupabaseConfig,
     insert_chat_log,
+    insert_chat_review_queue,
     list_active_certifications_by_person,
     list_all_active_certifications,
     list_all_people,
@@ -76,6 +77,28 @@ def _truncate_text(value: str | None, max_len: int = 4000) -> str | None:
     return s[: max_len - 3] + "..."
 
 
+def _classify_fit_status(
+    *,
+    intent: str | None,
+    success: bool,
+    http_status: int,
+    answer: str | None,
+) -> tuple[str, bool, str | None, str | None]:
+    """
+    Define question_fit_status e se precisa revisão, a partir do status HTTP e da intenção.
+    """
+    if http_status == 400 and (answer is None or "Não entendi" in (answer or "") or intent is None):
+        return ("fit_not_understood", True, "nlp_rule", "Pergunta não foi interpretada pelo NLP.")
+    if success and http_status == 200:
+        if answer and "Não encontrei" in answer:
+            return ("fit_no_data", True, "missing_data", "Consulta compreendida, mas sem dados na base.")
+        return ("fit_answered", False, None, None)
+    if http_status >= 500:
+        return ("error", True, "internal_error", "Erro interno ao processar a requisição.")
+    # fallback genérico (inclui casos fora de escopo)
+    return ("out_of_scope", True, "out_of_scope", "Pergunta fora do escopo atual ou regra não suportada.")
+
+
 def _safe_insert_chat_log(
     cfg: SupabaseConfig,
     *,
@@ -92,6 +115,12 @@ def _safe_insert_chat_log(
 ) -> None:
     # Logging best-effort: falha no log não pode quebrar o chat.
     try:
+        status, needs_update, gap_type, reason = _classify_fit_status(
+            intent=intent,
+            success=success,
+            http_status=http_status,
+            answer=answer,
+        )
         insert_chat_log(
             cfg,
             message=_truncate_text(message, 4000) or "",
@@ -104,6 +133,10 @@ def _safe_insert_chat_log(
             success=success,
             http_status=http_status,
             error_detail=_truncate_text(error_detail, 4000),
+            question_fit_status=status,
+            needs_knowledge_update=needs_update,
+            knowledge_gap_type=gap_type,
+            review_reason=reason,
         )
     except Exception:
         return

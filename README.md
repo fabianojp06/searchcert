@@ -95,7 +95,8 @@ Ele cria:
 - `public.colaboradores` (com `link_pasta` UNIQUE para upsert)
 - `public.certificacoes` (FK + `pdf_file_id` UNIQUE para evitar duplicatas)
 - `public.curriculos` (1 currículo vigente por colaborador, com `pdf_file_id`)
-- `public.chat_logs` (auditoria de perguntas e respostas do `POST /chat`)
+- `public.chat_logs` (auditoria de perguntas e respostas do `POST /chat`, com governança de entendimento)
+- `public.chat_review_queue` (fila de revisão manual de perguntas/gaps)
 
 ### Auditoria de buscas do chat
 
@@ -105,6 +106,8 @@ Cada requisição ao `POST /chat` é registrada na tabela `public.chat_logs` com
 - intenção detectada (`intent`) e hints (`person_hint`, `cert_hint`)
 - retorno (`answer`, `evidence`)
 - status (`success`, `http_status`) e erro (`error_detail`, quando houver)
+- governança: `question_fit_status` (`fit_answered`, `fit_no_data`, `fit_not_understood`, `out_of_scope`, `error`)
+- sinalização de melhoria: `needs_knowledge_update`, `knowledge_gap_type`, `review_reason`
 
 Consulta rápida:
 
@@ -113,6 +116,27 @@ select created_at, intent, success, http_status, message, answer
 from public.chat_logs
 order by created_at desc
 limit 20;
+```
+
+### Monitorar entendimento e fila de revisão
+
+- Taxa de entendimento e cobertura:
+
+```sql
+select question_fit_status, count(*)
+from public.chat_logs
+group by 1
+order by 1;
+```
+
+- Pendências na fila de revisão:
+
+```sql
+select created_at, status, gap_type, message, intent, reason
+from public.chat_review_queue
+where status = 'open'
+order by created_at desc
+limit 50;
 ```
 
 ## US002 — Mapear Drive → `output/us002.json`

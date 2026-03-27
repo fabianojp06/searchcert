@@ -48,6 +48,10 @@ def insert_chat_log(
     success: bool,
     http_status: int,
     error_detail: str | None,
+    question_fit_status: str,
+    needs_knowledge_update: bool,
+    knowledge_gap_type: str | None,
+    review_reason: str | None,
 ) -> None:
     """
     Insere auditoria da chamada do chat em `chat_logs`.
@@ -66,6 +70,36 @@ def insert_chat_log(
             "success": success,
             "http_status": int(http_status),
             "error_detail": error_detail,
+            "question_fit_status": question_fit_status,
+            "needs_knowledge_update": needs_knowledge_update,
+            "knowledge_gap_type": knowledge_gap_type,
+            "review_reason": review_reason,
+        }
+    ]
+    resp = requests.post(endpoint, headers=_headers(cfg), json=payload, timeout=30)
+    resp.raise_for_status()
+
+
+def insert_chat_review_queue(
+    cfg: SupabaseConfig,
+    *,
+    chat_log_id: str,
+    message: str,
+    intent: str | None,
+    gap_type: str,
+    reason: str | None,
+) -> None:
+    """
+    Cria item na fila de revisão manual (`chat_review_queue`).
+    """
+    endpoint = cfg.url.rstrip("/") + "/rest/v1/chat_review_queue"
+    payload = [
+        {
+            "chat_log_id": chat_log_id,
+            "message": message,
+            "intent": intent,
+            "gap_type": gap_type,
+            "reason": reason,
         }
     ]
     resp = requests.post(endpoint, headers=_headers(cfg), json=payload, timeout=30)

@@ -91,7 +91,12 @@ create table if not exists public.chat_logs (
   evidence jsonb null,
   success boolean not null default false,
   http_status integer not null,
-  error_detail text null
+  error_detail text null,
+  -- governança de perguntas
+  question_fit_status text not null default 'unknown',
+  needs_knowledge_update boolean not null default false,
+  knowledge_gap_type text null,
+  review_reason text null
 );
 
 create index if not exists chat_logs_created_at_idx
@@ -102,4 +107,27 @@ create index if not exists chat_logs_intent_idx
 
 create index if not exists chat_logs_success_idx
   on public.chat_logs (success);
+
+create index if not exists chat_logs_question_fit_status_idx
+  on public.chat_logs (question_fit_status);
+
+create index if not exists chat_logs_needs_knowledge_update_idx
+  on public.chat_logs (needs_knowledge_update);
+
+-- Fila de revisão manual de perguntas
+create table if not exists public.chat_review_queue (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  chat_log_id uuid not null references public.chat_logs(id) on delete cascade,
+  message text not null,
+  intent text null,
+  gap_type text not null,
+  reason text null,
+  status text not null default 'open', -- open | approved | rejected | done
+  owner text null,
+  resolution_note text null
+);
+
+create index if not exists chat_review_queue_status_created_at_idx
+  on public.chat_review_queue (status, created_at desc);
 
